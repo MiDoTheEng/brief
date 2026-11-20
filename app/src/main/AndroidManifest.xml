@@ -51,6 +51,11 @@
             android:exported="false"
             android:label="Connect Instagram" />
 
+        <activity
+            android:name=".CaptureActivity"
+            android:exported="false"
+            android:label="Play it in Brief" />
+
         <service
             android:name=".BriefService"
             android:exported="false"

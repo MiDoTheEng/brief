@@ -313,11 +313,27 @@ private fun Detail(id: String, back: () -> Unit) {
                     Spacer(Modifier.height(10.dp))
                     Text(b.error, color = Color(0xFFB3261E), fontSize = 15.sp)
                     Spacer(Modifier.height(16.dp))
-                    if (b.link.isNotBlank() || b.transcript.isNotBlank()) Button(
-                        onClick = { BriefService.redo(ctx, b.id, length, lang) },
-                        colors = ButtonDefaults.buttonColors(containerColor = Accent),
-                    ) { Text("Retry") }
+                    if (b.link.isNotBlank() || b.transcript.isNotBlank()) Row {
+                        Button(
+                            onClick = { BriefService.redo(ctx, b.id, length, lang) },
+                            colors = ButtonDefaults.buttonColors(containerColor = Accent),
+                        ) { Text("Retry") }
+                        if (b.link.isNotBlank() && b.transcript.isBlank()) {
+                            Spacer(Modifier.width(10.dp))
+                            Button(
+                                onClick = {
+                                    Store.update(ctx, b.id) { it.length = length; it.lang = lang }
+                                    ctx.startActivity(Intent(ctx, CaptureActivity::class.java).putExtra(BriefService.EXTRA_ID, b.id))
+                                },
+                                colors = ButtonDefaults.buttonColors(containerColor = Ink),
+                            ) { Text("Play it in Brief") }
+                        }
+                    }
                     else Text("Share the video file to Brief again to retry.", color = Muted)
+                    if (b.link.isNotBlank() && b.transcript.isBlank()) Text(
+                        "\"Play it in Brief\" opens the video here. Press play (sign in if asked) and Brief takes the sound from there.",
+                        color = Muted, fontSize = 13.sp, modifier = Modifier.padding(top = 8.dp),
+                    )
                 }
                 else -> {
                     Text("This version isn't made yet.", color = Ink, fontSize = 16.sp)

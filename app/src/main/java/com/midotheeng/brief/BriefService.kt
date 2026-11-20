@@ -45,11 +45,16 @@ class BriefService : Service() {
         val text = i.getStringExtra(EXTRA_TEXT)
         val uri = i.data
         val type = i.type
+        val mediaUrl = i.getStringExtra(EXTRA_MEDIA_URL)
+        val mediaExt = i.getStringExtra(EXTRA_MEDIA_EXT) ?: "mp4"
+        val mediaHeaders = i.getStringExtra(EXTRA_MEDIA_HEADERS)?.let { h ->
+            try { val o = org.json.JSONObject(h); o.keys().asSequence().associateWith { o.getString(it) } } catch (e: Exception) { emptyMap() }
+        } ?: emptyMap()
         jobs.incrementAndGet()
         active += id
         scope.launch {
             try {
-                run(id, text, uri, type, length, lang)
+                run(id, text, uri, type, length, lang, mediaUrl?.let { Triple(it, mediaExt, mediaHeaders) })
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Throwable) {
@@ -68,7 +73,7 @@ class BriefService : Service() {
 
     override fun onDestroy() { scope.cancel(); super.onDestroy() }
 
-    private suspend fun run(id: String, text: String?, uri: Uri?, type: String?, length: String, lang: String) {
+    private suspend fun run(id: String, text: String?, uri: Uri?, type: String?, length: String, lang: String, captured: Triple<String, String, Map<String, String>>? = null) {
         val key = Prefs.groqKey(this)
         if (key.isBlank()) throw BriefException("Add your free Groq key in Brief → Settings first.")
         val work = File(cacheDir, "job_$id").apply { mkdirs() }
@@ -84,6 +89,12 @@ class BriefService : Service() {
             // 1) Words: reuse the saved transcript if we already listened once.
             if (b.transcript.isBlank()) {
                 val transcript = when {
+                    captured != null -> {
+                        val f = File(work, "captured.${captured.second}")
+                        download(captured.first, captured.third, f, progress)
+                        setDuration(id, f)
+                        Summarizer.listen(key, Audio.split(f, File(work, "pieces")), progress)
+                    }
                     uri != null -> fromFile(id, uri, type, work, key, progress)
                     text != null -> fromLink(id, text, work, key, progress)
                     b.link.isNotBlank() -> fromLink(id, b.link, work, key, progress)
@@ -277,6 +288,9 @@ class BriefService : Service() {
         const val EXTRA_TEXT = "text"
         const val EXTRA_LENGTH = "length"
         const val EXTRA_LANG = "lang"
+        const val EXTRA_MEDIA_URL = "media_url"
+        const val EXTRA_MEDIA_EXT = "media_ext"
+        const val EXTRA_MEDIA_HEADERS = "media_headers"
         private const val CH_WORK = "work"
         private const val CH_DONE = "done"
         private const val MAX_VIDEO = 2L * 1024 * 1024 * 1024
@@ -303,6 +317,16 @@ class BriefService : Service() {
                 .setDataAndType(uri, type ?: "video/*").addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
                 .putExtra(EXTRA_LENGTH, length).putExtra(EXTRA_LANG, lang))
             return id
+        }
+
+        /** Continue a brief with a video/sound link caught in Brief's on-screen browser. */
+        fun fromCaptured(ctx: Context, id: String, url: String, ext: String, headers: Map<String, String>) {
+            val b = Store.get(ctx, id) ?: return
+            Store.update(ctx, id) { it.status = Brief.WORKING; it.error = ""; it.stage = "Starting…"; it.transcript = "" }
+            start(ctx, Intent(ctx, BriefService::class.java).putExtra(EXTRA_ID, id)
+                .putExtra(EXTRA_LENGTH, b.length).putExtra(EXTRA_LANG, b.lang)
+                .putExtra(EXTRA_MEDIA_URL, url).putExtra(EXTRA_MEDIA_EXT, ext)
+                .putExtra(EXTRA_MEDIA_HEADERS, org.json.JSONObject(headers as Map<*, *>).toString()))
         }
 
         /** Another version (Short/Detailed, English/Arabic) or a retry of an existing brief. */

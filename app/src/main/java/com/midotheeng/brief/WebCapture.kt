@@ -24,7 +24,19 @@ import kotlin.coroutines.resume
 object WebCapture {
     class Found(val url: String, val ext: String, val headers: Map<String, String>, val title: String)
 
-    private class Cand(val url: String, val audioOnly: Boolean, val videoOnly: Boolean, val ext: String)
+    class Cand(val url: String, val audioOnly: Boolean, val videoOnly: Boolean, val ext: String)
+
+    /** Is this browser request a video/audio stream? Returns it cleaned up (whole file, not one slice). */
+    fun sniff(u: String): Cand? {
+        if (!u.startsWith("http") || !MEDIA_EXT.containsMatchIn(u.substringBefore('?') + "?")) return null
+        val clean = u.replace(Regex("""&?(bytestart|byteend)=\d+"""), "").replace("?&", "?")
+        val key = clean.substringBefore('?')
+        val tag = efgTag(u)
+        val audio = tag.contains("audio") || u.contains("audio", true) && !u.contains("video", true)
+        val videoOnly = !audio && (tag.contains("dash") || u.contains("bytestart"))
+        val ext = if (audio) "m4a" else MEDIA_EXT.find(key + "?")?.groupValues?.get(1)?.lowercase() ?: "mp4"
+        return Cand(clean, audio, videoOnly, ext)
+    }
 
     /** What the hidden browser saw last time, for error messages. */
     @Volatile var lastDiag = ""
@@ -96,17 +108,10 @@ object WebCapture {
             wv.webViewClient = object : WebViewClient() {
                 override fun shouldInterceptRequest(view: WebView?, request: WebResourceRequest?): WebResourceResponse? {
                     val u = request?.url?.toString() ?: return null
-                    if (u.startsWith("http") && MEDIA_EXT.containsMatchIn(u.substringBefore('?') + "?")) {
-                        val clean = u.replace(Regex("""&?(bytestart|byteend)=\d+"""), "").replace("?&", "?")
-                        val key = clean.substringBefore('?')
-                        if (seen.add(key)) {
-                            val tag = efgTag(u)
-                            val audio = tag.contains("audio") || u.contains("audio", true) && !u.contains("video", true)
-                            val videoOnly = !audio && (tag.contains("dash") || u.contains("bytestart"))
-                            val ext = if (audio) "m4a" else MEDIA_EXT.find(key + "?")?.groupValues?.get(1)?.lowercase() ?: "mp4"
-                            cands += Cand(clean, audio, videoOnly, ext)
-                            if (audio) main.post { main.postDelayed({ finish() }, 800) }
-                        }
+                    val cand = sniff(u)
+                    if (cand != null && seen.add(cand.url.substringBefore('?'))) {
+                        cands += cand
+                        if (cand.audioOnly) main.post { main.postDelayed({ finish() }, 800) }
                     }
                     return null
                 }
