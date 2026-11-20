@@ -17,6 +17,7 @@ import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -97,6 +98,12 @@ private fun Home(open: (String) -> Unit, settings: () -> Unit) {
     var link by remember { mutableStateOf("") }
     var length by remember { mutableStateOf(Prefs.length(ctx)) }
     var lang by remember { mutableStateOf(Prefs.lang(ctx)) }
+    val selected = remember { mutableStateListOf<String>() }
+    var selecting by remember { mutableStateOf(false) }
+    var confirmDelete by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
+    LaunchedEffect(briefs) { selected.retainAll(briefs.map { it.id }.toSet()) }
+    BackHandler(enabled = selecting) { selecting = false; selected.clear() }
     val pick = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri: Uri? ->
         if (uri != null) {
             try { ctx.contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION) } catch (_: Exception) {}
@@ -105,7 +112,8 @@ private fun Home(open: (String) -> Unit, settings: () -> Unit) {
         }
     }
 
-    LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(20.dp)) {
+    Column(Modifier.fillMaxSize()) {
+    LazyColumn(Modifier.weight(1f).fillMaxWidth(), contentPadding = PaddingValues(20.dp)) {
         item {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text("Brief", fontSize = 34.sp, fontWeight = FontWeight.Black, color = Ink)
@@ -148,23 +156,92 @@ private fun Home(open: (String) -> Unit, settings: () -> Unit) {
                 }
             }
             Spacer(Modifier.height(22.dp))
-            if (briefs.isNotEmpty()) Text("Your briefs", fontWeight = FontWeight.Bold, color = Ink, fontSize = 18.sp)
+            if (briefs.isNotEmpty()) Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("Your briefs", fontWeight = FontWeight.Bold, color = Ink, fontSize = 18.sp)
+                Spacer(Modifier.weight(1f))
+                TextButton(onClick = { selecting = !selecting; selected.clear() }) {
+                    Text(if (selecting) "Cancel" else "Select", color = Accent, fontWeight = FontWeight.SemiBold)
+                }
+            }
             else Text(
                 "No briefs yet.\n\nIn YouTube, X, Instagram, your gallery or any app: tap Share → Brief.",
                 color = Muted, fontSize = 15.sp, lineHeight = 22.sp,
             )
             Spacer(Modifier.height(8.dp))
         }
-        items(briefs, key = { it.id }) { b -> BriefRow(b) { open(b.id) } }
+        items(briefs, key = { it.id }) { b ->
+            BriefRow(
+                b, selecting = selecting, checked = b.id in selected,
+                onClick = {
+                    if (selecting) { if (b.id in selected) selected.remove(b.id) else selected.add(b.id) }
+                    else open(b.id)
+                },
+                onLongClick = { selecting = true; if (b.id !in selected) selected.add(b.id) },
+            )
+        }
     }
+
+    if (selecting) Row(
+        Modifier.fillMaxWidth().background(Card).padding(horizontal = 12.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text("${selected.size} selected", color = Ink, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(start = 6.dp))
+        Spacer(Modifier.weight(1f))
+        TextButton(onClick = {
+            if (selected.size == briefs.size) selected.clear() else { selected.clear(); selected.addAll(briefs.map { it.id }) }
+        }) { Text(if (selected.size == briefs.size && briefs.isNotEmpty()) "None" else "All", color = Ink) }
+        TextButton(enabled = selected.isNotEmpty(), onClick = {
+            val chosen = briefs.filter { it.id in selected }
+            scope.launch {
+                val n = withContext(Dispatchers.IO) { savePdfs(ctx, chosen) }
+                Toast.makeText(ctx,
+                    if (n == 0) "Nothing to save yet (those briefs aren't finished)"
+                    else "Saved $n PDF${if (n > 1) "s" else ""} to Downloads/Brief", Toast.LENGTH_LONG).show()
+                selecting = false; selected.clear()
+            }
+        }) { Text("Save PDF", color = if (selected.isNotEmpty()) Ink else Muted) }
+        TextButton(enabled = selected.isNotEmpty(), onClick = { confirmDelete = true }) {
+            Text("Delete", color = if (selected.isNotEmpty()) Color(0xFFB3261E) else Muted)
+        }
+    }
+    }
+
+    if (confirmDelete) AlertDialog(
+        onDismissRequest = { confirmDelete = false },
+        title = { Text("Delete ${selected.size} brief${if (selected.size > 1) "s" else ""}?") },
+        text = { Text("PDFs you already saved stay in Downloads.") },
+        confirmButton = {
+            TextButton(onClick = {
+                selected.toList().forEach { Store.delete(ctx, it) }
+                selected.clear(); selecting = false; confirmDelete = false
+            }) { Text("Delete", color = Color(0xFFB3261E)) }
+        },
+        dismissButton = { TextButton(onClick = { confirmDelete = false }) { Text("Cancel") } },
+    )
+}
+
+/** Saves each finished brief (the version last shown) as a PDF. Returns how many were saved. */
+private fun savePdfs(ctx: android.content.Context, list: List<Brief>): Int {
+    var n = 0
+    list.forEach { b ->
+        val md = b.current ?: b.versions.values.firstOrNull() ?: return@forEach
+        try { Pdf.export(ctx, b, md); n++ } catch (_: Exception) {}
+    }
+    return n
 }
 
 @Composable
-private fun BriefRow(b: Brief, onClick: () -> Unit) {
-    Column(
+@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
+private fun BriefRow(b: Brief, selecting: Boolean, checked: Boolean, onClick: () -> Unit, onLongClick: () -> Unit) {
+    Row(
         Modifier.fillMaxWidth().padding(vertical = 5.dp)
-            .background(Card, RoundedCornerShape(16.dp)).clickable(onClick = onClick).padding(14.dp)
+            .background(if (checked) AccentSoft else Card, RoundedCornerShape(16.dp))
+            .combinedClickable(onClick = onClick, onLongClick = onLongClick).padding(14.dp),
+        verticalAlignment = Alignment.CenterVertically,
     ) {
+    if (selecting) Checkbox(checked = checked, onCheckedChange = { onClick() },
+        colors = CheckboxDefaults.colors(checkedColor = Accent), modifier = Modifier.padding(end = 6.dp))
+    Column(Modifier.weight(1f)) {
         Text(
             b.title.ifBlank { b.link.ifBlank { "Video" } }, color = Ink, fontWeight = FontWeight.SemiBold, fontSize = 16.sp,
             maxLines = 2, overflow = TextOverflow.Ellipsis, style = LocalTextStyle.current.copy(textDirection = TextDirection.Content),
@@ -180,6 +257,7 @@ private fun BriefRow(b: Brief, onClick: () -> Unit) {
             ).joinToString(" · ")
         }
         Text(status, color = when (b.status) { Brief.WORKING -> Accent; Brief.FAILED -> Color(0xFFB3261E); else -> Muted }, fontSize = 13.sp)
+    }
     }
 }
 
@@ -274,16 +352,13 @@ private fun Detail(id: String, back: () -> Unit) {
                 val m = md ?: return@TextButton
                 scope.launch {
                     try {
-                        val uri = withContext(Dispatchers.IO) { Pdf.export(ctx, b.copy(length = length, lang = lang), m) }
-                        Toast.makeText(ctx, "Saved to Downloads/Brief", Toast.LENGTH_SHORT).show()
-                        ctx.startActivity(Intent.createChooser(
-                            Intent(Intent.ACTION_SEND).setType("application/pdf").putExtra(Intent.EXTRA_STREAM, uri)
-                                .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION), "Share PDF"))
+                        withContext(Dispatchers.IO) { Pdf.export(ctx, b.copy(length = length, lang = lang), m) }
+                        Toast.makeText(ctx, "PDF saved to Downloads/Brief", Toast.LENGTH_LONG).show()
                     } catch (e: Exception) {
                         Toast.makeText(ctx, "PDF failed: ${e.message}", Toast.LENGTH_LONG).show()
                     }
                 }
-            }) { Text("PDF", color = if (md != null) Ink else Muted) }
+            }) { Text("Save PDF", color = if (md != null) Ink else Muted) }
             TextButton(enabled = md != null, onClick = {
                 val t = Md.plain(md ?: return@TextButton) + if (b.link.isNotBlank()) "\n\n${b.link}" else ""
                 ctx.startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).setType("text/plain").putExtra(Intent.EXTRA_TEXT, t), "Share brief"))
