@@ -19,14 +19,22 @@ data class Brief(
     var stage: String = "",           // what it's doing right now
     var error: String = "",
     var transcript: String = "",
+    var aiTitle: Boolean = false,     // title already taken from the brief itself
     val versions: MutableMap<String, String> = mutableMapOf(),
 ) {
     val current: String? get() = versions[key(length, lang)]
 
+    /** Names the brief after what the video is about (the brief's own heading). YouTube keeps its real title. */
+    fun nameFrom(md: String) {
+        if (aiTitle || (source == "YouTube" && title.isNotBlank())) return
+        md.lineSequence().firstOrNull { it.startsWith("# ") }?.removePrefix("# ")?.trim()?.replace("**", "")
+            ?.takeIf { it.isNotBlank() }?.let { title = it.take(120); aiTitle = true }
+    }
+
     fun toJson(): JSONObject = JSONObject().apply {
         put("id", id); put("title", title); put("source", source); put("link", link)
         put("created", created); put("durationSec", durationSec); put("length", length); put("lang", lang)
-        put("status", status); put("stage", stage); put("error", error); put("transcript", transcript)
+        put("status", status); put("stage", stage); put("error", error); put("transcript", transcript); put("aiTitle", aiTitle)
         put("versions", JSONObject(versions as Map<*, *>))
     }
 
@@ -45,7 +53,7 @@ data class Brief(
                 link = o.optString("link"), created = o.optLong("created"), durationSec = o.optLong("durationSec"),
                 length = o.optString("length", Prefs.SHORT), lang = o.optString("lang", Prefs.EN),
                 status = o.optString("status", DONE), stage = o.optString("stage"), error = o.optString("error"),
-                transcript = o.optString("transcript"), versions = v,
+                transcript = o.optString("transcript"), aiTitle = o.optBoolean("aiTitle"), versions = v,
             )
         }
     }
@@ -86,6 +94,14 @@ object Store {
     }
 
     /** Briefs left "working" by an app that was killed mid-way. */
+    fun renameOld(ctx: Context) {
+        all(ctx).filter { !it.aiTitle && it.versions.isNotEmpty() }.forEach { b ->
+            val before = b.title
+            b.nameFrom(b.current ?: b.versions.values.first())
+            if (b.title != before || b.aiTitle) save(ctx, b)
+        }
+    }
+
     fun markStale(ctx: Context, running: Set<String>) {
         all(ctx).filter { it.status == Brief.WORKING && it.id !in synchronized(running) { running.toSet() } }.forEach {
             it.status = if (it.versions.isEmpty()) Brief.FAILED else Brief.DONE

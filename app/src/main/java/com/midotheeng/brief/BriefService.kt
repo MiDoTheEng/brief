@@ -109,7 +109,7 @@ class BriefService : Service() {
             val md = Summarizer.write(key, model, b.title, b.transcript, length, lang, progress)
             Store.update(this, id) {
                 it.versions[Brief.key(length, lang)] = md
-                if (it.title.isBlank() || it.source == "file") md.lineSequence().firstOrNull { l -> l.startsWith("# ") }?.let { h -> it.title = h.removePrefix("# ").trim() }
+                it.nameFrom(md)
                 it.status = Brief.DONE; it.stage = ""; it.error = ""
             }
             notifyDone(id, "Brief ready", Store.get(this, id)?.title ?: "")

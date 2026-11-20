@@ -56,6 +56,7 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         if (Build.VERSION.SDK_INT >= 33) requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), 1)
         Store.markStale(this, BriefService.active)
+        Store.renameOld(this)
         route(intent)
         if (Prefs.groqKey(this).isBlank() && screen.value == Screen.Home) screen.value = Screen.Settings
         setContent {
@@ -243,7 +244,9 @@ private fun BriefRow(b: Brief, selecting: Boolean, checked: Boolean, onClick: ()
         colors = CheckboxDefaults.colors(checkedColor = Accent), modifier = Modifier.padding(end = 6.dp))
     Column(Modifier.weight(1f)) {
         Text(
-            b.title.ifBlank { b.link.ifBlank { "Video" } }, color = Ink, fontWeight = FontWeight.SemiBold, fontSize = 16.sp,
+            (if (b.aiTitle || b.source == "YouTube") b.title else "").ifBlank {
+                if (b.status == Brief.WORKING) "New brief…" else b.title.ifBlank { "Video" }
+            }, color = Ink, fontWeight = FontWeight.SemiBold, fontSize = 16.sp,
             maxLines = 2, overflow = TextOverflow.Ellipsis, style = LocalTextStyle.current.copy(textDirection = TextDirection.Content),
         )
         Spacer(Modifier.height(4.dp))
@@ -309,7 +312,7 @@ private fun Detail(id: String, back: () -> Unit) {
                     Text("You can leave the app; you'll get a notification when it's ready.", color = Muted, fontSize = 14.sp)
                 }
                 b.status == Brief.FAILED && b.versions.isEmpty() -> {
-                    Text(b.title.ifBlank { "Couldn't make this brief" }, fontSize = 20.sp, fontWeight = FontWeight.Bold, color = Ink)
+                    Text("Couldn't make this brief", fontSize = 20.sp, fontWeight = FontWeight.Bold, color = Ink)
                     Spacer(Modifier.height(10.dp))
                     Text(b.error, color = Color(0xFFB3261E), fontSize = 15.sp)
                     Spacer(Modifier.height(16.dp))
