@@ -26,6 +26,9 @@ object WebCapture {
 
     private class Cand(val url: String, val audioOnly: Boolean, val videoOnly: Boolean, val ext: String)
 
+    /** What the hidden browser saw last time, for error messages. */
+    @Volatile var lastDiag = ""
+
     private val MEDIA_EXT = Regex("""\.(mp4|m4a|webm|mov|mp3|aac|m4v)(?:$|[?#])""", RegexOption.IGNORE_CASE)
 
     fun ua(ctx: Context): String = try {
@@ -52,6 +55,7 @@ object WebCapture {
                     cands.firstOrNull { it.audioOnly } ?: htmlVideo?.let { Cand(it, false, false, "mp4") }
                         ?: cands.firstOrNull { !it.videoOnly }
                 }
+                lastDiag = "browser saw \"${title.take(40)}\", ${cands.size} media, page link: ${if (htmlVideo != null) "yes" else "no"}"
                 val cookies = try { CookieManager.getInstance().getCookie(pageUrl) } catch (e: Exception) { null }
                 try { wv.stopLoading(); wv.destroy() } catch (_: Exception) {}
                 val headers = buildMap {
@@ -63,7 +67,8 @@ object WebCapture {
 
             fun scan() {
                 if (done) return
-                val js = """(function(){try{var v=document.querySelector('video');if(v){v.muted=true;v.play&&v.play();}
+                val js = """(function(){try{var b=document.querySelector('.EmbeddedMediaVideo,.EmbeddedMedia,[aria-label*="Play"],[aria-label*="play"],.videoSpritePlayButton');if(b&&b.click)b.click();
+                    |var v=document.querySelector('video');if(v){v.muted=true;v.play&&v.play();}
                     |return JSON.stringify({t:document.title||'',src:(v&&v.currentSrc&&v.currentSrc.indexOf('http')==0)?v.currentSrc:'',
                     |html:document.documentElement.outerHTML.slice(0,3000000)});}catch(e){return '{}'}})()""".trimMargin()
                 wv.evaluateJavascript(js) { raw ->

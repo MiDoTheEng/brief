@@ -34,7 +34,7 @@ object Instagram {
             "embed" to { embed(code) },
         )
         for ((name, attempt) in tries) {
-            val p = try { attempt() } catch (e: Exception) { errors += "$name: ${e.message}"; null }
+            val p = try { attempt() } catch (e: Exception) { errors += "$name: ${e.message}"; continue }
             if (p == null || p.media.isEmpty()) { errors += "$name: nothing"; continue }
             val hasVideo = p.media.any { it.kind == Kind.VIDEO }
             if (hasVideo || !wantVideo) return p
@@ -59,7 +59,7 @@ object Instagram {
     }
 
     private fun withLogin(code: String): Post? {
-        val jar = sessionCookies() ?: return null
+        val jar = sessionCookies() ?: throw Exception("not signed in")
         val cookies = jar.split(';').map { it.trim() }.filter { it.contains('=') }
             .associate { it.substringBefore('=') to it.substringAfter('=') }.toMutableMap()
         val body = request(
@@ -69,8 +69,9 @@ object Instagram {
                 "X-Requested-With" to "XMLHttpRequest", "Accept" to "*/*",
                 "Referer" to "https://www.instagram.com/p/$code/",
             ),
-        ) ?: return null
-        val item = try { JSONObject(body).optJSONArray("items")?.optJSONObject(0) } catch (e: Exception) { null } ?: return null
+        ) ?: throw Exception("signed in, but Instagram refused")
+        val item = try { JSONObject(body).optJSONArray("items")?.optJSONObject(0) } catch (e: Exception) { null }
+            ?: throw Exception("signed in, but no media in reply")
         return fromItem(code, item)
     }
 

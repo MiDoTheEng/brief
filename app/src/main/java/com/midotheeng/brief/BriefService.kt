@@ -128,11 +128,19 @@ class BriefService : Service() {
         if (media == null) {
             // Fallback for any site: open it in a hidden browser and catch the video as it loads.
             progress("Opening the page like a browser…")
-            val found = WebCapture.capture(this, url)
+            val igCode = Regex("""instagr(?:am\.com|\.am)/(?:[^/?#]+/)?(?:p|reels?|tv)/([A-Za-z0-9_-]+)""").find(url)?.groupValues?.get(1)
+            val pages = listOfNotNull(igCode?.let { "https://www.instagram.com/p/$it/embed/captioned/" }, url)
+            var found: WebCapture.Found? = null
+            val seen = mutableListOf<String>()
+            for (pg in pages) {
+                found = WebCapture.capture(this, pg)
+                seen += WebCapture.lastDiag
+                if (found != null) break
+            }
             if (found == null) {
                 val ig = host.contains("instagram")
                 throw BriefException(
-                    "Couldn't get the video from this link" + (failure?.let { " ($it)" } ?: "") + ". " +
+                    "Couldn't get the video from this link" + (failure?.let { " ($it)" } ?: "") + "; " + seen.joinToString("; ") + ". " +
                         (if (ig && Instagram.sessionCookies() == null) "Instagram often hides videos from logged-out visitors: connect your account in Brief → Settings, then tap Retry. "
                         else "") +
                         "Or save the video to your phone and share the file to Brief."
