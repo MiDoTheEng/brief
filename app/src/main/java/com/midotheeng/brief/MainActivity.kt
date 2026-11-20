@@ -375,6 +375,33 @@ private fun Settings(back: () -> Unit) {
 
         Spacer(Modifier.height(18.dp))
         Column(Modifier.fillMaxWidth().background(Card, RoundedCornerShape(20.dp)).padding(16.dp)) {
+            var igOn by remember { mutableStateOf(com.midotheeng.brief.links.Instagram.sessionCookies() != null) }
+            val life = androidx.lifecycle.compose.LocalLifecycleOwner.current
+            DisposableEffect(life) {
+                val obs = androidx.lifecycle.LifecycleEventObserver { _, e ->
+                    if (e == androidx.lifecycle.Lifecycle.Event.ON_RESUME) igOn = com.midotheeng.brief.links.Instagram.sessionCookies() != null
+                }
+                life.lifecycle.addObserver(obs)
+                onDispose { life.lifecycle.removeObserver(obs) }
+            }
+            Text("Instagram (optional)", fontWeight = FontWeight.Bold, color = Ink, fontSize = 17.sp)
+            Spacer(Modifier.height(6.dp))
+            Text(
+                if (igOn) "✓ Connected. Instagram reels will work more reliably."
+                else "Instagram hides many reels from logged-out apps. Sign in once inside Brief so it can read the reels you share.",
+                color = Muted, fontSize = 14.sp, lineHeight = 20.sp,
+            )
+            Spacer(Modifier.height(10.dp))
+            if (igOn) OutlinedButton(onClick = {
+                android.webkit.CookieManager.getInstance().removeAllCookies(null)
+                android.webkit.CookieManager.getInstance().flush()
+                igOn = false
+            }) { Text("Disconnect", color = Ink) }
+            else OutlinedButton(onClick = { ctx.startActivity(Intent(ctx, LoginActivity::class.java)) }) { Text("Connect Instagram", color = Ink) }
+        }
+
+        Spacer(Modifier.height(18.dp))
+        Column(Modifier.fillMaxWidth().background(Card, RoundedCornerShape(20.dp)).padding(16.dp)) {
             Text("Good to know", fontWeight = FontWeight.Bold, color = Ink, fontSize = 17.sp)
             Spacer(Modifier.height(6.dp))
             Text(

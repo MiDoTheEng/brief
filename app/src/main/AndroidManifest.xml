@@ -46,6 +46,11 @@
             </intent-filter>
         </activity>
 
+        <activity
+            android:name=".LoginActivity"
+            android:exported="false"
+            android:label="Connect Instagram" />
+
         <service
             android:name=".BriefService"
             android:exported="false"

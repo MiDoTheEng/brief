@@ -13,6 +13,7 @@ import android.net.Uri
 import android.os.Build
 import android.os.IBinder
 import android.provider.OpenableColumns
+import com.midotheeng.brief.links.Instagram
 import com.midotheeng.brief.links.Kind
 import com.midotheeng.brief.links.MOBILE_UA
 import com.midotheeng.brief.links.Net
@@ -120,11 +121,33 @@ class BriefService : Service() {
         }
 
         progress("Finding the video…")
-        val post = try { Router.resolve(text) } catch (e: Exception) {
-            throw BriefException("Couldn't find a video at that link: ${e.message}")
+        val host = Regex("""https?://(?:www\.|m\.)?([^/?#]+)""").find(url)?.groupValues?.get(1)?.lowercase().orEmpty()
+        var failure: String? = null
+        val post = try { Router.resolve(text) } catch (e: Exception) { failure = e.message; null }
+        val media = post?.media?.firstOrNull { it.kind == Kind.VIDEO || it.kind == Kind.GIF }
+        if (media == null) {
+            // Fallback for any site: open it in a hidden browser and catch the video as it loads.
+            progress("Opening the page like a browser…")
+            val found = WebCapture.capture(this, url)
+            if (found == null) {
+                val ig = host.contains("instagram")
+                throw BriefException(
+                    "Couldn't get the video from this link" + (failure?.let { " ($it)" } ?: "") + ". " +
+                        (if (ig && Instagram.sessionCookies() == null) "Instagram often hides videos from logged-out visitors: connect your account in Brief → Settings, then tap Retry. "
+                        else "") +
+                        "Or save the video to your phone and share the file to Brief."
+                )
+            }
+            Store.update(this, id) {
+                if (it.source.isBlank()) it.source = host.substringBefore('.').replaceFirstChar { c -> c.uppercase() }
+                if (it.title.isBlank()) it.title = found.title.take(90)
+            }
+            val file = File(work, "video.${found.ext}")
+            download(found.url, found.headers, file, progress)
+            setDuration(id, file)
+            return Summarizer.listen(key, Audio.split(file, File(work, "pieces")), progress)
         }
-        val media = post.media.firstOrNull { it.kind == Kind.VIDEO || it.kind == Kind.GIF }
-            ?: throw BriefException("That post has no video in it.")
+        post!!
         Store.update(this, id) {
             it.source = post.source.replaceFirstChar { c -> c.uppercase() }
             if (it.title.isBlank()) it.title = post.text.lineSequence().firstOrNull().orEmpty().take(90)

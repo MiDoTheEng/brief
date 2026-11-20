@@ -28,6 +28,7 @@ object Instagram {
         val errors = mutableListOf<String>()
         var photosOnly: Post? = null
         val tries: List<Pair<String, () -> Post?>> = listOf(
+            "account" to { withLogin(code) },
             "web" to { webPost(code, kind) },
             "api" to { webGet(code) },
             "embed" to { embed(code) },
@@ -42,6 +43,35 @@ object Instagram {
         }
         if (wantVideo) throw Exception("Instagram didn't give the video (${errors.joinToString("; ")})")
         return photosOnly ?: throw NoMediaException("Instagram didn't share this post. It may be private.")
+    }
+
+    // ------------------------------------------------------------------ 0) Logged in (Settings → Connect Instagram)
+    fun sessionCookies(): String? = try {
+        android.webkit.CookieManager.getInstance().getCookie("https://www.instagram.com")
+            ?.takeIf { it.contains("sessionid=") }
+    } catch (e: Throwable) { null }
+
+    private fun mediaId(code: String): String {
+        val abc = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_"
+        var n = java.math.BigInteger.ZERO
+        for (ch in code.take(11)) n = n.multiply(java.math.BigInteger.valueOf(64)).add(java.math.BigInteger.valueOf(abc.indexOf(ch).toLong()))
+        return n.toString()
+    }
+
+    private fun withLogin(code: String): Post? {
+        val jar = sessionCookies() ?: return null
+        val cookies = jar.split(';').map { it.trim() }.filter { it.contains('=') }
+            .associate { it.substringBefore('=') to it.substringAfter('=') }.toMutableMap()
+        val body = request(
+            "https://www.instagram.com/api/v1/media/${mediaId(code)}/info/", cookies = cookies,
+            headers = mapOf(
+                "X-IG-App-ID" to APP_ID, "X-CSRFToken" to (cookies["csrftoken"] ?: ""), "X-ASBD-ID" to "129477",
+                "X-Requested-With" to "XMLHttpRequest", "Accept" to "*/*",
+                "Referer" to "https://www.instagram.com/p/$code/",
+            ),
+        ) ?: return null
+        val item = try { JSONObject(body).optJSONArray("items")?.optJSONObject(0) } catch (e: Exception) { null } ?: return null
+        return fromItem(code, item)
     }
 
     // ------------------------------------------------------------------ 1) POST, like instagram.com does
