@@ -3,7 +3,6 @@ package com.midotheeng.brief
 import kotlinx.coroutines.delay
 import org.json.JSONArray
 import org.json.JSONObject
-import java.io.DataOutputStream
 import java.io.File
 import java.net.HttpURLConnection
 import java.net.URL
@@ -158,18 +157,16 @@ object Groq {
         c.doOutput = true
         c.setRequestProperty("Authorization", "Bearer $key")
         c.setRequestProperty("Content-Type", "multipart/form-data; boundary=$boundary")
-        c.setChunkedStreamingMode(64 * 1024)
-        DataOutputStream(c.outputStream).use { out ->
-            fun field(name: String, value: String) {
-                out.writeBytes("--$boundary\r\nContent-Disposition: form-data; name=\"$name\"\r\n\r\n")
-                out.write(value.toByteArray()); out.writeBytes("\r\n")
-            }
-            field("model", WHISPER)
-            field("response_format", "verbose_json")
-            field("temperature", "0")
-            out.writeBytes("--$boundary\r\nContent-Disposition: form-data; name=\"file\"; filename=\"${file.name}\"\r\nContent-Type: $mime\r\n\r\n")
+        fun field(name: String, value: String) =
+            "--$boundary\r\nContent-Disposition: form-data; name=\"$name\"\r\n\r\n$value\r\n".toByteArray()
+        val head = field("model", WHISPER) + field("response_format", "verbose_json") + field("temperature", "0") +
+            "--$boundary\r\nContent-Disposition: form-data; name=\"file\"; filename=\"${file.name}\"\r\nContent-Type: $mime\r\n\r\n".toByteArray()
+        val tail = "\r\n--$boundary--\r\n".toByteArray()
+        c.setFixedLengthStreamingMode(head.size + file.length() + tail.size)
+        c.outputStream.use { out ->
+            out.write(head)
             file.inputStream().use { it.copyTo(out, 64 * 1024) }
-            out.writeBytes("\r\n--$boundary--\r\n")
+            out.write(tail)
         }
         return read(c)
     }
